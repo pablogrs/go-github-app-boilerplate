@@ -4,57 +4,42 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/google/go-github/github"
 	"github.com/justinas/alice"
 	log "github.com/sirupsen/logrus"
+	"github.hpe.com/sharkysharks/go-github-app-boilerplate/config"
+	"github.hpe.com/sharkysharks/go-github-app-boilerplate/middleware"
 )
 
 /*
 	Add top level GitHub request payload keys to this struct based on the events the app is subscribing to and pull in
 	the type from the go-github/github library
 */
-type WebhookAPIRequest struct {
-	Action       string              `json:"action"`
-	Installation AppInstallation     `json:"installation"`
-	Issue        github.Issue        `json:"issue"`
-	IssueComment github.IssueComment `json:"comment"`
-	Repo         github.Repository   `json:"repository"`
-}
-
-type AppInstallation struct {
-	Id int64 `json:"id"`
-}
-
-var (
-	conf    *Config
-	payload *WebhookAPIRequest
-)
 
 func init() {
 	log.SetFormatter(&log.TextFormatter{})
 
-	c, err := readConfig()
+	c, err := config.ReadConfig()
 	if err != nil {
 		log.Fatal("Error reading config file: ", err)
 	}
-	conf = c
+
+	middleware.SetConfig(c)
 }
 
 func main() {
 	// health check endpoint
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		return
 	})
 
 	// middleware
-	stdChain := alice.New(validatePayload, authenticate)
+	stdChain := alice.New(middleware.ValidatePayload, middleware.Authenticate)
 
 	// main application endpoint
 	http.Handle("/", stdChain.Then(http.HandlerFunc(app)))
 
 	log.Info("Server listening...")
-	if err := http.ListenAndServe(":8080", nil); err != nil {
+	if err := http.ListenAndServe(":8000", nil); err != nil {
 		log.Fatal(err)
 	}
 }
@@ -74,8 +59,8 @@ func app(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "POST" {
 		switch githubEvent := r.Header.Get("X-GitHub-Event"); githubEvent {
 		case "issue_comment":
-			if payload.Action == "created" {
-				comment := strings.TrimSpace(*payload.IssueComment.Body)
+			if middleware.Payload.Action == "created" {
+				comment := strings.TrimSpace(*middleware.Payload.IssueComment.Body)
 				switch comment {
 				case "run all tests":
 					log.Info("Received event to run all tests")
@@ -83,7 +68,7 @@ func app(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		case "installation":
-			if payload.Action == "created" {
+			if middleware.Payload.Action == "created" {
 				log.Info("Received installation request")
 			}
 		default:

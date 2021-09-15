@@ -1,4 +1,4 @@
-package main
+package middleware
 
 import (
 	"encoding/json"
@@ -7,17 +7,36 @@ import (
 	"github.com/bradleyfalzon/ghinstallation"
 	"github.com/google/go-github/github"
 	log "github.com/sirupsen/logrus"
+	"github.hpe.com/sharkysharks/go-github-app-boilerplate/config"
 )
 
+type WebhookAPIRequest struct {
+	Action       string              `json:"action"`
+	Installation AppInstallation     `json:"installation"`
+	Issue        github.Issue        `json:"issue"`
+	IssueComment github.IssueComment `json:"comment"`
+	Repo         github.Repository   `json:"repository"`
+}
+
+type AppInstallation struct {
+	Id int64 `json:"id"`
+}
+
 var ghClient *github.Client
+var conf *config.Config
+var Payload *WebhookAPIRequest
+
+func SetConfig(config *config.Config) {
+	conf = config
+}
 
 // validate payload webhook signature
-func validatePayload(next http.Handler) http.Handler {
+func ValidatePayload(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p, err := github.ValidatePayload(r, []byte(conf.GithubApp.GithubWebhookSecret))
 		if err != nil {
 			log.Error(err)
-			http.Error(w, http.StatusText(401), 401)
+			http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 			return
 		}
 
@@ -26,7 +45,7 @@ func validatePayload(next http.Handler) http.Handler {
 			log.Error("Error unmarshalling json payload: ", err)
 			return
 		}
-		payload = pd
+		Payload = pd
 		next.ServeHTTP(w, r)
 	})
 }
@@ -42,9 +61,9 @@ func getWebhookAPIRequest(body []byte) (*WebhookAPIRequest, error) {
 }
 
 // authenticate as Github App
-func authenticate(next http.Handler) http.Handler {
+func Authenticate(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		c, err := initClient(payload.Installation.Id)
+		c, err := initClient(Payload.Installation.Id, conf)
 		if err != nil {
 			log.Error("Error initializing client: ", err)
 			return
@@ -55,7 +74,7 @@ func authenticate(next http.Handler) http.Handler {
 	})
 }
 
-func initClient(installationId int64) (*github.Client, error) {
+func initClient(installationId int64, conf *config.Config) (*github.Client, error) {
 	tr := http.DefaultTransport
 	itr, err := ghinstallation.New(
 		tr,
